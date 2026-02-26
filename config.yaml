@@ -8,16 +8,16 @@ catalog:
   mag: 'MAG_{}'
   mag_dered: 'MAG_{}'
   mag_err: 'MAG_ERR_{}'
-  mag_max: 28.5
+  mag_max: 28.0
   nside: 32
   profile: null
-  bkg_file: '/scratch/gpfs/JENNYG/jiaxuanl/Data/Roman/UFD_detection/cena_3000s.phot.csv'
+  bkg_file: '/scratch/gpfs/JENNYG/jiaxuanl/Data/Roman/UFD_detection/cena_3000s.phot.sharp0.02.csv'
 isochrone:
   age: 12
   metallicity: 0.0001
   name: Bressan2012
   survey: des
-  radius: 0.15
+  radius: 0.2
   filename: '/scratch/gpfs/JENNYG/jiaxuanl/Data/SBF/Rosesim/PARSEC/PARSEC_v1.2S_Roman_vega_nTP20.dat'
 output:
   candidate_list: candidate_list.csv
@@ -27,15 +27,16 @@ output:
 search:
   distance_modulus_min: 27.5 # mag
   distance_modulus_max: 28.5 # mag
-  distance_modulus_step: 0.05 # mag
+  distance_modulus_step: 0.1 # mag
   delta_x: 2 # arcsec
-  delta_x_coverage: 4 # arcsec
-  smoothing: 6 # arcsec
+  delta_x_coverage: 15 # arcsec, need to be large to overcome local fluctuations
+  smoothing: 12 # arcsec
   bin_extent: 300 # arcsec
-  bin_extent_coverage: 600 # arcsec
-  aperture_min: 2 # arcsec
-  aperture_max: 72 # arcsec
+  bin_extent_coverage: 300 # arcsec
+  aperture_min: 4 # arcsec
+  aperture_max: 50 # arcsec
   aperture_step: 1 # arcsec
 survey:
   fracdet: null
   name: des
+verbose: true

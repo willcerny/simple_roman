@@ -9,12 +9,22 @@ from astropy.table import Table
 import artpop
 import rosesim
 from rosesim.rose import RomanGalaxy
-from rosesim import ripples_completeness_dict, ripples_mag_uncertainty_dict
 sys.path.append('/home/jiaxuanl/Research/Roman_Cycle1/')
 from ripples.utils import setup_dolphot_cat, apply_obs_model_two_band
+from ripples import ripples_completeness_dict, ripples_mag_uncertainty_dict, mass_size_LVDB
 
 class MockGalaxy():
-    def __init__(self, ra, dec, distance, log_m_star):
+    def __init__(self, ra, dec, distance, log_m_star, reff=None, seed=42):
+        """
+        Initialize a mock galaxy.
+
+        Args:
+            ra, dec: RA and Dec of the galaxy in degrees
+            distance: distance to the galaxy in Mpc
+            log_m_star: log of the stellar mass in M_sun
+            reff: effective radius in kpc. If None, use the LVDB mass-size relation.
+            seed: random seed for reproducibility
+        """
         self.ra = ra
         self.dec = dec
         self.distance = distance
@@ -23,10 +33,16 @@ class MockGalaxy():
         log_age = 10.1
         feh = -2.0
 
+        if reff is None:
+            reff = 10**mass_size_LVDB(log_m_star) / 1000 * u.kpc
+        else:
+            reff = reff * u.kpc
+        self.reff = reff
+
         gal_kwargs = {'age': (10**log_age) * u.yr,
                   'feh': feh,
                   'total_mass': 10**log_m_star,
-                  'r_eff': 10**rosesim.mass_size_carlsten(log_m_star) / 1000 * u.kpc,
+                  'r_eff': reff,
                   'distance': distance * u.Mpc}
         gal = RomanGalaxy(prefix='mock', 
                           data_dir="/scratch/gpfs/JENNYG/jiaxuanl/Data/Roman/UFD_detection")
@@ -46,8 +62,8 @@ class MockGalaxy():
         sp = artpop.SSP(iso, total_mass=gal_kwargs['total_mass'],
                         distance=gal_kwargs['distance'],
                         mag_limit=mag_lim, mag_limit_band='F158',
-                        random_state=None)
-        src = artpop.SersicSP(sp, n=0.8, theta=10 * u.deg, ellip=0.3,
+                        random_state=np.random.RandomState(seed))
+        src = artpop.SersicSP(sp, n=0.8, theta=0 * u.deg, ellip=0,
                             r_eff=gal_kwargs['r_eff'], xy_dim=s, pixel_scale=rosesim.pixel_scale)
         # convert Vega to AB
         for filt in src.mags.colnames:

@@ -25,21 +25,6 @@ class Search:
         """
         Initializes the Search pipeline, parsing target coordinates, loading the 
         baseline background catalog, and pre-computing theoretical isochrones.
-
-        To optimize batch processing for mock injections, the background catalog 
-        and isochrone grids are loaded into memory only once during initialization.
-
-        Args:
-            config_file (str): Path to the YAML configuration file. Defaults to 'config.yaml'.
-            band1 (str): Primary photometric band name (e.g., 'F106'). Defaults to 'F106'.
-            band2 (str): Secondary photometric band name (e.g., 'F158'). Defaults to 'F158'.
-            ra (float, optional): Right Ascension of the target field center in degrees.
-            dec (float, optional): Declination of the target field center in degrees.
-            nside (int, optional): HEALPix nside resolution (required if ra/dec are omitted).
-            ipix (int, optional): HEALPix pixel index (required if ra/dec are omitted).
-
-        Raises:
-            ValueError: If neither (ra, dec) nor (nside, ipix) pairs are provided.
         """
         # Coordinate parsing
         if ra is not None and dec is not None:
@@ -50,28 +35,67 @@ class Search:
         else:
             raise ValueError('Please specify either (ra, dec) or (nside, ipix).')
 
-        # Load configuration
-        with open(config_file, 'r') as ymlfile:
-            self.cfg = yaml.load(ymlfile, Loader=yaml.SafeLoader)
-        
-        self.verbose = self.cfg.get('verbose', True)
-        
-        self.surveyobj = survey.Survey(self.cfg)
-        self.region = survey.Region(self.surveyobj, ra, dec)
+        self.config_file = config_file
         self.band1 = band1
         self.band2 = band2
+
+        # 1. Initial config load (mutates self.cfg, self.verbose, and self.surveyobj)
+        self.reload_config(reload_isochrones=False, _initial_load=True)
+        
+        self.region = survey.Region(self.surveyobj, ra, dec)
 
         if self.verbose:
             print(f"Search coordinates: (RA, Dec) = ({self.region.ra:.2f}, {self.region.dec:.2f})")
             print(f"Search healpixel: {self.region.pix_center} (nside = {self.region.nside})")
 
-        # 1. Load the background catalog ONLY ONCE
+        # 2. Load the background catalog ONLY ONCE
         self.region.load_data_roman(self.cfg['catalog']['bkg_file'])
         
         if self.verbose:
             print(f"Loaded {len(self.region.data)} point sources and {len(self.region.galaxies)} galaxies in baseline background catalog.")
 
-        # 2. Pre-compute Isochrones ONLY ONCE
+        # 3. Pre-compute Isochrones ONLY ONCE
+        self._compute_isochrones()
+
+    def reload_config(self, config_file=None, reload_isochrones=False, _initial_load=False):
+        """
+        Dynamically reloads the YAML configuration file and updates survey parameters 
+        in-place without needing to re-initialize the entire Search object or reload data.
+
+        Args:
+            config_file (str, optional): A new path to a YAML config. If None, uses the 
+                                         previously stored path.
+            reload_isochrones (bool): If True, forces a re-computation of the isochrone 
+                                      grids. Set to False to skip this expensive step.
+            _initial_load (bool): Internal flag to suppress print statements during __init__.
+        """
+        if config_file is not None:
+            self.config_file = config_file
+            
+        with open(self.config_file, 'r') as ymlfile:
+            self.cfg = yaml.load(ymlfile, Loader=yaml.SafeLoader)
+        
+        self.verbose = self.cfg.get('verbose', True)
+        
+        # Update the core survey object with the new config parameters
+        self.surveyobj = survey.Survey(self.cfg)
+        
+        # If the region already exists in memory, we must safely sync its survey reference
+        if hasattr(self, 'region'):
+            self.region.survey = self.surveyobj
+            self.region.nside = self.surveyobj.catalog['nside']
+            self.region.fracdet = getattr(self.surveyobj, 'fracdet', None)
+            
+        if self.verbose and not _initial_load:
+            print(f"Configuration dynamically reloaded from '{self.config_file}'")
+            
+        if reload_isochrones:
+            self._compute_isochrones()
+
+    def _compute_isochrones(self):
+        """
+        Internal helper method to pre-compute the theoretical isochrone grids.
+        """
         if self.verbose:
             print('Pre-computing isochrones given the distance modulus range...')
             
@@ -162,7 +186,7 @@ class Search:
                 np.concatenate(n_obs_half_arr) if n_obs_half_arr else [],
                 np.concatenate(n_model_arr) if n_model_arr else [])
 
-    def run_injection_trial(self, mock_ra, mock_dec, mock_distance, mock_log_m_star, mc_source_id=1):
+    def run_injection_trial(self, mock_ra, mock_dec, mock_distance, mock_log_m_star, seed=1, mc_source_id=1):
         """
         Executes a complete injection-recovery trial by resetting the catalog, 
         injecting a synthetic mock galaxy, and searching the updated data.
@@ -187,8 +211,9 @@ class Search:
 
         # 2. Inject the mock galaxy
         from . import mock
-        gal = mock.MockGalaxy(mock_ra, mock_dec, mock_distance, mock_log_m_star)
+        gal = mock.MockGalaxy(mock_ra, mock_dec, mock_distance, mock_log_m_star, seed=seed)
         gal.make_star_catalog()
+
         # Note: If self.base_data is a Pandas DataFrame, you should use pd.concat. 
         # If setup_dolphot_cat returns a numpy recarray, keep np.concatenate.
         if isinstance(self.region.base_data, pd.DataFrame):
@@ -200,6 +225,10 @@ class Search:
 
         if len(self.region.data) == 0:
             return None
+
+        # if 'MC_SOURCE_ID' in self.region.data.columns:
+        #     true_flag = self.region.data['MC_SOURCE_ID'] == 1
+        #     print('Number of stars above F106<27.4 and F158<27.4:', np.sum((mag_1[true_flag] < 27.4) & (mag_2[true_flag] < 27.4)))
 
         # 3. Dynamically compute the isochrone selection masks for the new combined data
         iso_selection_array = [
@@ -215,6 +244,7 @@ class Search:
             )
             for iso in self.iso_search_array
         ]
+        self.iso_selection_array = iso_selection_array
 
         # 4. Search over all distance moduli
         results = [self._search_by_distance(dm, iso_sel) 
@@ -286,9 +316,6 @@ class Search:
                 by `run_injection_trial`.
             mock_id (int): The unique identifier for the current injection trial.
         """
-        if not self.verbose:
-            return
-            
         print(f"\n--- Results for Mock ID {mock_id} ---")
         
         if results_dict is None or len(results_dict['SIG']) == 0:
@@ -356,7 +383,6 @@ class Search:
         b2_key = self.cfg['catalog']['basis_2']
 
         x_stars, y_stars = proj.sphereToImage(self.region.data[b1_key], self.region.data[b2_key])
-        print(len(x_stars), len(y_stars))
         if hasattr(self.region, 'galaxies') and len(self.region.galaxies) > 0:
             x_gals, y_gals = proj.sphereToImage(self.region.galaxies[b1_key], self.region.galaxies[b2_key])
         else:
@@ -420,7 +446,7 @@ class Search:
 
         # PANEL 3: Hess Diagram
         ax = axs[2]
-        xbins = np.arange(-0.5, 1.5, 0.1)
+        xbins = np.arange(-0.75, 1.5, 0.1)
         mag_limit = self.cfg['catalog']['mag_max']
         ybins = np.arange(mag_limit - 8.0, mag_limit + 0.5, 0.25) 
         
@@ -435,12 +461,18 @@ class Search:
 
         isochrone.drawIsochrone(iso, ax=ax, color='royalblue', lw=2, linestyle='-', zorder=10)
 
-        ax.set_xlim(-0.5, 1.5)
+        ax.set_xlim(-0.75, 1.5)
         ax.set_ylim(mag_limit, mag_limit - 8.0) 
         ax.set_xlabel(rf'${self.band1} - {self.band2}$ (mag)')
         ax.set_ylabel(rf'${self.band1}$ (mag)')
         fig.colorbar(pc3, cax=make_axes_locatable(ax).append_axes('right', size='5%', pad=0))
-        
+
+        if 'MC_SOURCE_ID' in self.region.data.columns:
+            true_flag = self.region.data['MC_SOURCE_ID'] == 1
+            ax.scatter(color[true_flag], mag_1[true_flag], s=30, ec='k', fc='darkviolet', zorder=10, alpha=0.7)
+            print('Number of stars above F106<27.4 and F158<27.4:', np.sum((mag_1[true_flag] < 27.4) & (mag_2[true_flag] < 27.4)))
+
+            ax.scatter(color[iso_filter], mag_1[iso_filter], s=20, ec='none', fc='darkgreen', alpha=0.7)
         # Save
         if outfile is not None:
             save_dir = self.cfg.get('output', {}).get('save_dir', './')
