@@ -16,8 +16,6 @@ os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
-CHECKPOINT_FILE = 'mass_completeness_checkpoint.csv'
-
 # ==========================================
 # 1. Global Simulation Parameters
 # ==========================================
@@ -27,7 +25,7 @@ box_size_deg = 200.0 / 3600.0
 fixed_distance = 3.5 # Mpc
 
 mass_array = np.arange(3.8, 5.5, 0.1)
-seeds_per_mass = 60
+seeds_per_mass = 100
 
 def compute_bootstrap_errors(detections, n_bootstraps=1000):
     n_trials = len(detections)
@@ -111,7 +109,7 @@ if __name__ == '__main__':
     
     tasks = [(m, s, i) for i, m in enumerate(mass_array) for s in range(seeds_per_mass)]
             
-    num_cores = 12 # leave 1 core for the OS
+    num_cores = 22 # leave 1 core for the OS
     print(f"\nDispatching {len(tasks)} simulations across {num_cores} cores...")
     start_time = time.time()
     
@@ -122,7 +120,7 @@ if __name__ == '__main__':
     
     # Create DataFrame directly from list of dicts
     df = pd.DataFrame(results_list)
-    df.to_csv('mass_completeness_results.csv', index=False)
+    df.to_csv(f'/home/jiaxuanl/Research/Roman_Cycle1/data/mass_completeness_results_{fixed_distance}Mpc.csv', index=False)
 
     # ==========================================
     # 4. Aggregation and Plotting
@@ -156,3 +154,6 @@ if __name__ == '__main__':
 
     plt.savefig('completeness_curve_with_errors.png', dpi=300, bbox_inches='tight')
     # plt.show()
+
+
+# salloc --nodes=1 --ntasks=24 --mem=32G --time=03:00:00 --account=jennyg

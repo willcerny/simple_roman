@@ -15,7 +15,7 @@ class Isochrone():
     A class to load and manipulate theoretical PARSEC isochrones, converting 
     them to the appropriate Roman Space Telescope filter system (AB magnitudes).
     """
-    def __init__(self, logage=10.1, feh=-2.0, distance_modulus=16.0, 
+    def __init__(self, logage=10.08, feh=-2.0, distance_modulus=16.0, 
                  band_1='F106', band_2='F158', 
                  filename='/scratch/gpfs/JENNYG/jiaxuanl/Data/SBF/Rosesim/PARSEC/PARSEC_v1.2S_Roman_vega_nTP20.dat',
                  verbose=True):

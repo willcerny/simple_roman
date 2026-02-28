@@ -49,7 +49,12 @@ class Search:
             print(f"Search healpixel: {self.region.pix_center} (nside = {self.region.nside})")
 
         # 2. Load the background catalog ONLY ONCE
+        print('Loading background catalog...')
         self.region.load_data_roman(self.cfg['catalog']['bkg_file'])
+
+        if 'halo_star_file' in self.cfg['catalog']:
+            print('Loading halo star catalog...')
+            self.region.load_halo_stars(self.cfg['catalog']['halo_star_file'])
         
         if self.verbose:
             print(f"Loaded {len(self.region.data)} point sources and {len(self.region.galaxies)} galaxies in baseline background catalog.")
@@ -105,7 +110,8 @@ class Search:
             self.cfg['search']['distance_modulus_step']
         )
         self.iso_search_array = [
-            isochrone.Isochrone(band_1=self.band1, band_2=self.band2, 
+            isochrone.Isochrone(logage=self.cfg['isochrone']['logage'], feh=self.cfg['isochrone']['feh'],
+                                band_1=self.band1, band_2=self.band2, 
                                 distance_modulus=dm,
                                 filename=self.cfg['isochrone']['filename'], 
                                 verbose=self.verbose) 
@@ -213,6 +219,7 @@ class Search:
         from . import mock
         gal = mock.MockGalaxy(mock_ra, mock_dec, mock_distance, mock_log_m_star, seed=seed)
         gal.make_star_catalog()
+        print('reff', gal.reff)
 
         # Note: If self.base_data is a Pandas DataFrame, you should use pd.concat. 
         # If setup_dolphot_cat returns a numpy recarray, keep np.concatenate.
@@ -412,15 +419,15 @@ class Search:
         convolution = scipy.ndimage.filters.gaussian_filter(signal, sigma_smooth/delta_x).T
         pc = ax.pcolormesh(bins, bins, convolution, cmap='Greys', rasterized=True)
         # how to get vmin and vmax from pc?
-        vmin = pc.get_clim()[0]
-        vmax = pc.get_clim()[1]
+        # vmin = pc.get_clim()[0]
+        # vmax = pc.get_clim()[1]
 
-        ax.text(0.05, 0.95, 'Stars (Isochrone Filtered)', transform=ax.transAxes, verticalalignment='top', bbox=props)
+        ax.text(0.07, 0.92, 'Stars (Isochrone Filtered)', transform=ax.transAxes, verticalalignment='top', bbox=props)
         ax.set_xlim(bound, -bound)
         ax.set_ylim(-bound, bound)
         ax.set_xlabel(r'$\Delta {\rm RA}$ (deg)')
         ax.set_ylabel(r'$\Delta {\rm Dec}$ (deg)')
-        fig.colorbar(pc, cax=make_axes_locatable(ax).append_axes('right', size='5%', pad=0))
+        # fig.colorbar(pc, cax=make_axes_locatable(ax).append_axes('right', size='5%', pad=0))
 
         circle = plt.Circle((0, 0), r0, color='r', fill=False, linestyle='--')
         ax.add_artist(circle)
@@ -435,10 +442,11 @@ class Search:
             convolution_gals = scipy.ndimage.filters.gaussian_filter(signal_gals, sigma_smooth/delta_x).T
             pc2 = ax.pcolormesh(bins, bins, convolution_gals, cmap='Greys', rasterized=True)
             # set vmin and vmax to be the same as pc
-            # pc2.set_clim(vmin, vmax + 0.3)
-            fig.colorbar(pc2, cax=make_axes_locatable(ax).append_axes('right', size='5%', pad=0))
+            vmin, vmax = np.percentile(convolution_gals, [1, 99.999])
+            pc2.set_clim(vmin, vmax+0.2)
+            # fig.colorbar(pc2, cax=make_axes_locatable(ax).append_axes('right', size='5%', pad=0))
         
-        ax.text(0.05, 0.95, 'Galaxies', transform=ax.transAxes, verticalalignment='top', bbox=props)
+        ax.text(0.07, 0.92, 'Galaxies', transform=ax.transAxes, verticalalignment='top', bbox=props)
         ax.set_xlim(bound, -bound)
         ax.set_ylim(-bound, bound)
         ax.set_xlabel(r'$\Delta {\rm RA}$ (deg)')
@@ -463,16 +471,23 @@ class Search:
 
         ax.set_xlim(-0.75, 1.5)
         ax.set_ylim(mag_limit, mag_limit - 8.0) 
-        ax.set_xlabel(rf'${self.band1} - {self.band2}$ (mag)')
-        ax.set_ylabel(rf'${self.band1}$ (mag)')
-        fig.colorbar(pc3, cax=make_axes_locatable(ax).append_axes('right', size='5%', pad=0))
+        ax.set_xlabel(rf'{self.band1} $-$ {self.band2} (AB mag)')
+        ax.set_ylabel(rf'{self.band1} (AB mag)')
+        # fig.colorbar(pc3, cax=make_axes_locatable(ax).append_axes('right', size='5%', pad=0))
 
         if 'MC_SOURCE_ID' in self.region.data.columns:
-            true_flag = self.region.data['MC_SOURCE_ID'] == 1
-            ax.scatter(color[true_flag], mag_1[true_flag], s=30, ec='k', fc='darkviolet', zorder=10, alpha=0.7)
+            true_flag = (self.region.data['MC_SOURCE_ID'] == 1) & inner
+            ax.scatter(color[true_flag], mag_1[true_flag], s=30, ec='k', fc='lime', zorder=10, alpha=0.7, label='UFD stars')
             print('Number of stars above F106<27.4 and F158<27.4:', np.sum((mag_1[true_flag] < 27.4) & (mag_2[true_flag] < 27.4)))
-
-            ax.scatter(color[iso_filter], mag_1[iso_filter], s=20, ec='none', fc='darkgreen', alpha=0.7)
+            try:
+                halo_flag = (self.region.data['MC_SOURCE_ID'] == 2) & inner
+                if np.sum(halo_flag) > 0:
+                    ax.scatter(color[halo_flag], mag_1[halo_flag], s=30, ec='k', fc='darkviolet', zorder=10, alpha=0.7, label='Halo stars')
+            except:
+                pass
+            # ax.scatter(color[iso_filter], mag_1[iso_filter], s=20, ec='none', fc='darkgreen', alpha=0.7, label='Isochrone stars')
+            props = dict(boxstyle='round', facecolor='white', alpha=0.8)
+            ax.legend(loc='upper left', frameon=True, bbox_to_anchor=(0, 1.0), bbox_transform=ax.transAxes, edgecolor='black', handletextpad=0, labelspacing=0, borderpad=0.3)
         # Save
         if outfile is not None:
             save_dir = self.cfg.get('output', {}).get('save_dir', './')

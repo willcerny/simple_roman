@@ -11,7 +11,7 @@ import rosesim
 from rosesim.rose import RomanGalaxy
 sys.path.append('/home/jiaxuanl/Research/Roman_Cycle1/')
 from ripples.utils import setup_dolphot_cat, apply_obs_model_two_band
-from ripples import ripples_completeness_dict, ripples_mag_uncertainty_dict, mass_size_LVDB
+from ripples import ripples_completeness_dict, ripples_mag_uncertainty_dict, mass_size_DELVE
 
 class MockGalaxy():
     def __init__(self, ra, dec, distance, log_m_star, reff=None, seed=42):
@@ -29,12 +29,15 @@ class MockGalaxy():
         self.dec = dec
         self.distance = distance
         self.log_m_star = log_m_star
+        self.seed = seed
         dmod = 5 * np.log10(distance) + 25
         log_age = 10.1
         feh = -2.0
 
         if reff is None:
-            reff = 10**mass_size_LVDB(log_m_star) / 1000 * u.kpc
+            # sample the mass-size relation using random seed
+            log_reff = mass_size_DELVE(log_m_star, add_scatter=True, seed=self.seed)
+            reff = 10**log_reff / 1000 * u.kpc
         else:
             reff = reff * u.kpc
         self.reff = reff
@@ -76,7 +79,7 @@ class MockGalaxy():
         self.src = src
 
     def make_star_catalog(self, nexp=5, MA_table='IM_600_16'):
-        rng = np.random.default_rng(123)
+        rng = np.random.default_rng(self.seed)
         if MA_table != "IM_600_16":
             raise ValueError("MA_table must be 'IM_600_16'")
         if nexp not in [5]:

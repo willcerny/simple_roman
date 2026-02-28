@@ -12,13 +12,14 @@ catalog:
   nside: 32
   profile: null
   bkg_file: '/scratch/gpfs/JENNYG/jiaxuanl/Data/Roman/UFD_detection/cena_3000s.phot.sharp0.02.csv'
+  # halo_star_file: '/scratch/gpfs/JENNYG/jiaxuanl/Data/Roman/UFD_detection/symphony_halo023_60_per_amin2_3000s.phot.csv'
 isochrone:
-  age: 12
-  metallicity: 0.0001
-  name: Bressan2012
-  survey: des
+  logage: 10.08
+  feh: -2.0
+  # name: Bressan2012
+  # survey: des
   radius: 0.2
-  filename: '/scratch/gpfs/JENNYG/jiaxuanl/Data/SBF/Rosesim/PARSEC/PARSEC_v1.2S_Roman_vega_nTP20.dat'
+  filename: '/scratch/gpfs/JENNYG/jiaxuanl/Data/SBF/Rosesim/PARSEC/PARSEC_v1.2s_Roman_vega_nTP20_12Gyr.dat'
 output:
   candidate_list: candidate_list.csv
   log_dir: log_dir

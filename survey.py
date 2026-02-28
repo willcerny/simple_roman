@@ -117,6 +117,23 @@ class Region():
         # 3. Finalize the arrays
         self._split_catalog()
 
+    def load_halo_stars(self, data_dir):
+        """
+        Loads the halo star catalog from disk. This serves as the 'base' catalog, 
+        which could be purely background, or could be a real science field.
+        """
+        data = pd.read_csv(data_dir)
+        processed_data = data[data['quality_flag']]
+
+        self.halo_star_data = processed_data
+
+        # combine this data with existing data
+        self.base_data = pd.concat([self.base_data, self.halo_star_data])
+        self.all_data = self.base_data.copy()
+        
+        # 3. Finalize the arrays
+        self._split_catalog()
+
     def reset_data(self):
         """
         Wipes the active catalog and resets it to the pristine base data.
