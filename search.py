@@ -494,3 +494,200 @@ class Search:
             os.makedirs(save_dir, exist_ok=True)
             fig.savefig(os.path.join(save_dir, outfile), bbox_inches='tight')
             plt.close(fig)
+
+
+    def plot_candidate_proposal(self, ra, dec, distance_modulus, r_peak, sig, outfile='candidate_plot.png'):
+        """
+        Generates and saves a 3-panel validation plot for visual vetting of a 
+        candidate using in-memory data. 
+
+        The panels include:
+        1. Smoothed spatial map of stars surviving the isochrone filter.
+        2. Smoothed spatial map of background galaxies (for false-positive checking).
+        3. Background-subtracted Hess (color-magnitude) diagram with theoretical 
+           isochrone overlaid.
+
+        Args:
+            ra (float): Right Ascension of the candidate center.
+            dec (float): Declination of the candidate center.
+            distance_modulus (float): Best-fit distance modulus for the candidate.
+            r_peak (float): Optimal candidate radius in degrees.
+            sig (float): Poisson significance of the detection.
+            outfile (str, optional): Filename for the saved plot. Set to None to skip saving. 
+                Defaults to 'candidate_plot.png'.
+        """
+        idx = np.argmin(np.abs(self.distance_modulus_search_array - distance_modulus))
+        iso = self.iso_search_array[idx]
+        
+        mag_1 = self.region.data[self.cfg['catalog']['mag'].format(self.band1)]
+        mag_2 = self.region.data[self.cfg['catalog']['mag'].format(self.band2)]
+        mag_err_1 = self.region.data[self.cfg['catalog']['mag_err'].format(self.band1)]
+        mag_err_2 = self.region.data[self.cfg['catalog']['mag_err'].format(self.band2)]
+
+        iso_filter = isochrone.cut_isochrone_path(
+            mag_1, mag_2, mag_err_1, mag_err_2, iso,
+            mag_max=self.cfg['catalog']['mag_max'], 
+            radius=self.cfg['isochrone']['radius'],
+            verbose=self.verbose
+        )
+
+        bound = max(r_peak * 10.0, 2.8 / 60.0) 
+        bound = 1.0 / 60.0
+        delta_x = self.cfg['search']['delta_x'] / 3600 # deg
+        bin_extent = self.cfg['search']['bin_extent'] / 3600 # deg
+        smoothing = self.cfg['search']['smoothing'] / 3600 # deg
+        bins = np.arange(-bin_extent, bin_extent + 1.e-10, delta_x)
+
+        proj = projector.Projector(ra, dec)
+        b1_key = self.cfg['catalog']['basis_1']
+        b2_key = self.cfg['catalog']['basis_2']
+
+        x_stars, y_stars = proj.sphereToImage(self.region.data[b1_key], self.region.data[b2_key])
+        color = mag_1 - mag_2
+        r0 = 3.0 * r_peak
+        r1 = 5.0 * r_peak
+        r2 = np.sqrt(r0**2 + r1**2)
+        angsep = coordinate_tools.angsep(ra, dec, self.region.data[b1_key], self.region.data[b2_key])
+        
+        inner = (angsep < r0)
+        outer = ((angsep > r1) & (angsep < r2))
+
+        # fig, axs = plt.subplots(1, 2, figsize=(9.5, 4))
+        fig, axs = plt.subplots(1, 2, figsize=(8, 4))
+        fig.subplots_adjust(wspace=0.5)
+        props = dict(boxstyle='round', facecolor='white', alpha=0.8)
+
+        # PANEL 1: Stellar histogram
+        ax = axs[0]
+        signal = np.histogram2d(x_stars[iso_filter], y_stars[iso_filter], bins=[bins, bins])[0]
+        sigma_smooth = smoothing * (0.25 * np.arctan(0.25 * r0 * 60. - 1.5) + 1.3)
+        
+        if self.verbose:
+            print('smoothing size:', sigma_smooth)
+            
+        convolution = scipy.ndimage.filters.gaussian_filter(signal, sigma_smooth/delta_x).T
+        pc = ax.pcolormesh(bins * 60, bins * 60, convolution, cmap='Greys', rasterized=True, vmin=0.02, vmax=0.2)
+        # how to get vmin and vmax from pc?
+
+        # true_flag = (self.region.data['MC_SOURCE_ID'] == 1) & iso_filter
+        # ax.scatter(x_stars[true_flag] * 60, y_stars[true_flag] * 60, s=20, ec='w', fc='none', zorder=10, alpha=1)
+        # ax.text(0.07, 0.92, 'Stellar Density', transform=ax.transAxes, verticalalignment='top', bbox=props, fontsize=12)
+        ax.set_xlim(bound * 60, -bound * 60)
+        ax.set_ylim(-bound * 60, bound * 60)
+        # set aspect ratio to 1
+        ax.set_aspect('equal', adjustable='box')
+        ax.set_xticks([-2, -1, 0, 1, 2])
+        ax.set_yticks([-2, -1, 0, 1, 2])
+        ax.minorticks_off()
+        ax.spines['top'].set_linewidth(1.5)
+        ax.spines['bottom'].set_linewidth(1.5)
+        ax.spines['left'].set_linewidth(1.5)
+        ax.spines['right'].set_linewidth(1.5)
+        ax.set_xlabel(r'$\Delta {\rm RA}$ [arcmin]')
+        ax.set_ylabel(r'$\Delta {\rm Dec}$ [arcmin]')
+        # fig.colorbar(pc, cax=make_axes_locatable(ax).append_axes('right', size='5%', pad=0))
+
+        # circle = plt.Circle((0, 0), r0 * 60, color='r', fill=False, linestyle='--')
+        # ax.add_artist(circle)
+
+        # ax.text(0.95, 0.05, 'Radius: {:.1f} arcsec'.format(r_peak*3600), transform=ax.transAxes, verticalalignment='bottom', color='red', ha='right')
+        # ax.text(0.95, 0.15, '{:.1f} sigma'.format(sig), transform=ax.transAxes, verticalalignment='bottom', color='red', ha='right')
+
+        # PANEL 2: Hess Diagram
+        ax = axs[1]
+        xbins = np.arange(-0.75, 1.2, 0.1)
+        mag_limit = self.cfg['catalog']['mag_max'] + 1
+        ybins = np.arange(mag_limit - 8.0, mag_limit + 0.5, 0.25) 
+        
+        fg = np.histogram2d(color[inner], mag_1[inner], bins=[xbins, ybins])[0].T
+        bg = np.histogram2d(color[outer], mag_1[outer], bins=[xbins, ybins])[0].T
+        
+        mask_abs = np.absolute(fg) + np.absolute(bg)
+        mask_abs[mask_abs == 0.] = np.nan
+        signal_hess = np.ma.array((fg - bg), mask=np.isnan(mask_abs))
+        # pc3 = ax.pcolormesh(xbins, ybins, signal_hess, cmap='coolwarm', rasterized=True, vmin=-5, vmax=5)
+
+        isochrone.drawIsochrone(iso, ax=ax, color='k', lw=2, linestyle='-', zorder=10, label='Isochrone')
+
+        ax.set_xlim(-0.75, 1.2)
+        ax.set_xlim(-0.75, 0.75)
+        ax.set_xticks([-0.5, 0, 0.5, 1])
+        ax.set_ylim(mag_limit, mag_limit - 6.5) 
+        # turn off minor ticks
+        ax.minorticks_off()
+        # turn off major ticks on the top and right
+        ax.tick_params(axis='both', which='major', top=False, right=False)
+        ax.set_box_aspect(1)
+        ax.set_xlabel(rf'{self.band1} $-$ {self.band2} [AB mag]')
+        ax.set_ylabel(rf'{self.band1} [AB mag]')
+        ax.spines['top'].set_linewidth(1.5)
+        ax.spines['bottom'].set_linewidth(1.5)
+        ax.spines['left'].set_linewidth(1.5)
+        ax.spines['right'].set_linewidth(1.5)
+
+        # show the 27.4 mag line
+        ax.axhline(27.4, color='gray', linestyle='--', lw=1)
+        ax.fill_between([-0.75, 1.2], 27.4, mag_limit, color='lightgray', alpha=0.4)
+        # fig.colorbar(pc3, cax=make_axes_locatable(ax).append_axes('right', size='5%', pad=0))
+
+        # show photometryc uncertainty
+        from ripples import ripples_mag_uncertainty_dict
+        from ripples.utils import mag_uncertainty_func
+        F106_error = lambda mag: mag_uncertainty_func(mag, *ripples_mag_uncertainty_dict['3.5Mpc']['F106'])
+        F158_error = lambda mag: mag_uncertainty_func(mag, *ripples_mag_uncertainty_dict['3.5Mpc']['F158'])
+        for ymag in np.arange(24.5, 27.5, 0.75):
+            plt.errorbar(0.73, ymag, yerr=F106_error(ymag), 
+                        xerr=np.sqrt(F158_error(ymag)**2 + F106_error(ymag)**2), 
+                        capsize=0, color='dimgray')
+
+        if 'MC_SOURCE_ID' in self.region.data.columns:
+            true_flag = (self.region.data['MC_SOURCE_ID'] == 1) & inner & iso_filter
+            ax.scatter(color[true_flag], mag_1[true_flag], s=40, ec='k', fc='dodgerblue', zorder=10, alpha=1, label='Members')
+            try:
+                halo_flag = (self.region.data['MC_SOURCE_ID'] == 2) & inner & iso_filter
+                if np.sum(halo_flag) > 0:
+                    ax.scatter(color[halo_flag], mag_1[halo_flag], s=30, ec='none', fc='darkorange', zorder=1, alpha=0.7, label='Halo stars')
+            except:
+                pass
+
+            try:
+                gal_flag = (self.region.data['MC_SOURCE_ID'] == 0) & inner & iso_filter
+                if np.sum(gal_flag) > 0:
+                    ax.scatter(color[gal_flag], mag_1[gal_flag], s=20, ec='none', fc='dimgray', zorder=10, alpha=0.7, label='Background')
+            except:
+                pass
+
+            props = dict(boxstyle='round', facecolor='white', alpha=0.8)
+            leg = ax.legend(ncol=2, loc='upper center', frameon=True, edgecolor='dimgray', bbox_to_anchor=(0.5, 1),
+                            handletextpad=0.5, labelspacing=0.1, handlelength=1.2,
+                            columnspacing=0.3, borderpad=0.4, fontsize=11)
+            for handle in leg.legend_handles:
+                if isinstance(handle, plt.Line2D):
+                    # make the handle shorter, not thinner
+                    # handle.set_linewidth(2)
+                    # handle.set_dashes([1, 1])
+                    continue
+                handle.set_sizes([20.0]) # forces all legend dots to a uniform size
+        
+        # --- ADD SECONDARY Y-AXIS ---
+        # Calculate the distance modulus
+        dm = 5 * np.log10(3.5) + 25
+
+        # Define the forward (apparent to absolute) and inverse transformations
+        def app_to_abs(m):
+            return m - dm
+
+        def abs_to_app(M_abs):
+            return M_abs + dm
+
+        # Create the axis on the right
+        secax = ax.secondary_yaxis('right', functions=(app_to_abs, abs_to_app))
+        
+        # Label it (using LaTeX formatting for the subscript band name)
+        secax.set_ylabel(rf'$M_{{\rm {self.band1}}}$')
+        secax.minorticks_off()
+
+        # Save
+        if outfile is not None:
+            fig.savefig(outfile, bbox_inches='tight')
+            plt.close(fig)

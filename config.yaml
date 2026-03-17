@@ -12,7 +12,7 @@ catalog:
   nside: 32
   profile: null
   bkg_file: '/scratch/gpfs/JENNYG/jiaxuanl/Data/Roman/UFD_detection/cena_3000s.phot.sharp0.02.csv'
-  # halo_star_file: '/scratch/gpfs/JENNYG/jiaxuanl/Data/Roman/UFD_detection/symphony_halo023_60_per_amin2_3000s.phot.csv'
+  halo_star_file: '/scratch/gpfs/JENNYG/jiaxuanl/Data/Roman/UFD_detection/symphony_halo023_30_per_amin2_3000s.phot.csv'
 isochrone:
   logage: 10.08
   feh: -2.0
